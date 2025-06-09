@@ -4,7 +4,7 @@ A collection of reusable GitHub Actions for AI-powered development workflows.
 
 ## 🤖 Claude Code Review Action
 
-Get intelligent code reviews and suggestions from Claude 4 Sonnet by simply commenting on your pull requests.
+Get intelligent code reviews and automated fixes from Claude 4 Sonnet by simply commenting on your pull requests. Claude can both review code and create fix PRs with proposed changes.
 
 ### ⚡ Quick Start
 
@@ -20,7 +20,7 @@ on:
     types: [opened, synchronize]
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: write
 

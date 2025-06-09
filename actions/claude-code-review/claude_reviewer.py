@@ -338,14 +338,15 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
         # If this is a propose changes request, try to extract and apply changes
         if self.action_type == 'propose':
             changes = self.extract_file_changes(claude_response)
-            
+
             if changes and changes.get('has_changes', False):
                 print("Claude suggested changes, applying them...")
                 files_changed = self.apply_file_changes(changes)
-                
+
                 if files_changed:
                     self.set_github_output('has_changes', 'true')
                     print("✅ Changes applied successfully")
+                    print("Files will be committed and PR will be created by workflow")
                 else:
                     self.set_github_output('has_changes', 'false')
                     print("❌ No changes were applied")
