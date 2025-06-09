@@ -37,6 +37,7 @@ runs:
       with:
         token: ${{ inputs.github-token }}
         fetch-depth: 0
+        repository: ${{ github.repository }}
 
     - name: Get PR details
       id: pr-details

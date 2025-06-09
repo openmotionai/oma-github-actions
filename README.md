@@ -8,7 +8,7 @@ Reusable GitHub Actions for OMA development workflows.
 AI-powered code review using Claude 4 Sonnet with extended thinking.
 
 ```yaml
-- uses: openmotionai/github-actions/actions/claude-code-review@v1
+- uses: openmotionai/oma-github-actions/actions/claude-code-review@main
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: openmotionai/github-actions/actions/claude-code-review@v1
+    - uses: openmotionai/oma-github-actions/actions/claude-code-review@main
       with:
         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
