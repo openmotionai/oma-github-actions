@@ -109,13 +109,30 @@ runs:
             core.setOutput('command', command);
             core.setOutput('has_command', 'true');
             
-            // Determine action type
-            const proposeKeywords = ['fix', 'repair', 'correct', 'update', 'change', 'modify', 'implement', 'refactor', 'improve', 'optimize', 'add', 'remove', 'replace', 'rewrite', 'restructure', 'simplify', 'enhance', 'clean up', 'cleanup'];
-            const reviewKeywords = ['review', 'analyze', 'check', 'examine', 'look', 'explain', 'describe', 'what', 'how', 'why'];
-            
-            let actionType = 'review';
-            if (proposeKeywords.some(keyword => command.toLowerCase().includes(keyword))) {
-              actionType = 'propose';
+            // Determine action type based on command
+            let actionType = 'review'; // default
+
+            if (command.toLowerCase().startsWith('plan')) {
+              actionType = 'plan';
+            } else if (command.toLowerCase().startsWith('fix') ||
+                       command.toLowerCase().startsWith('implement') ||
+                       command.toLowerCase().startsWith('apply')) {
+              actionType = 'fix';
+            } else if (command.toLowerCase().startsWith('review') ||
+                       command.toLowerCase().startsWith('analyze') ||
+                       command.toLowerCase().startsWith('check') ||
+                       command.toLowerCase().startsWith('examine')) {
+              actionType = 'review';
+            } else {
+              // Fallback: check for action keywords in the command
+              const fixKeywords = ['fix', 'repair', 'correct', 'implement', 'apply', 'create pr', 'make changes'];
+              const planKeywords = ['plan', 'discuss', 'think about', 'consider', 'strategy', 'approach'];
+
+              if (fixKeywords.some(keyword => command.toLowerCase().includes(keyword))) {
+                actionType = 'fix';
+              } else if (planKeywords.some(keyword => command.toLowerCase().includes(keyword))) {
+                actionType = 'plan';
+              }
             }
             
             core.setOutput('action_type', actionType);
@@ -157,7 +174,7 @@ runs:
       run: python ${{ github.action_path }}/claude_reviewer.py
 
     - name: Create fix branch and PR
-      if: steps.extract-command.outputs.has_command == 'true' && steps.claude-analysis.outputs.has_changes == 'true' && steps.extract-command.outputs.action_type == 'propose'
+      if: steps.extract-command.outputs.has_command == 'true' && steps.claude-analysis.outputs.has_changes == 'true' && steps.extract-command.outputs.action_type == 'fix'
       id: create-fix-pr
       shell: bash
       env:
@@ -253,13 +270,17 @@ runs:
             *Claude Code Review Action*`;
           }
 
-          // Add PR link if changes were applied
+          // Add action-specific footer based on action type
           const hasChanges = '${{ steps.claude-analysis.outputs.has_changes }}' === 'true';
           const actionType = '${{ steps.extract-command.outputs.action_type }}';
           const fixBranch = '${{ steps.create-fix-pr.outputs.fix_branch }}';
 
-          if (hasChanges && actionType === 'propose' && fixBranch) {
+          if (hasChanges && actionType === 'fix' && fixBranch) {
             reviewContent += `\n\n---\n\n🔧 **Automated fixes have been applied!**\n\nI've created a pull request with the suggested changes: [View PR with fixes](https://github.com/${context.repo.owner}/${context.repo.repo}/compare/${{ steps.pr-details.outputs.head_ref }}...${fixBranch})\n\nPlease review the changes before merging.`;
+          } else if (actionType === 'plan') {
+            reviewContent += `\n\n---\n\n💡 **Planning Mode**: This was a planning discussion. When you're ready to implement changes, use \`@claude fix [specific issue]\` to create a PR with the fixes.`;
+          } else if (actionType === 'review') {
+            reviewContent += `\n\n---\n\n🔍 **Review Mode**: This was an analysis. To implement fixes, use \`@claude fix [specific issue]\` or start with \`@claude plan\` for strategic discussion.`;
           }
 
           // Get PR number based on event type

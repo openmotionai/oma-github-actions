@@ -77,8 +77,37 @@ class ClaudeReviewer:
                     
         return changed_files
     
+    def get_previous_claude_comments(self) -> List[Dict]:
+        """Get all previous @claude comments from this PR for conversation context."""
+        comments = []
+        try:
+            # Get all comments on the PR
+            pr_comments = self.pr.get_issue_comments()
+
+            for comment in pr_comments:
+                comment_body = comment.body
+                # Check if this is a Claude comment (contains @claude or @Claude)
+                if '@claude' in comment_body.lower() or '@Claude' in comment_body:
+                    # Extract the command after @claude
+                    import re
+                    claude_match = re.search(r'@[Cc]laude\s+(.+)', comment_body)
+                    if claude_match:
+                        command = claude_match.group(1).strip()
+                        comments.append({
+                            'created_at': comment.created_at,
+                            'user': comment.user.login,
+                            'command': command,
+                            'full_body': comment_body
+                        })
+        except Exception as e:
+            print(f"Warning: Could not fetch previous comments: {e}")
+
+        # Sort by creation time
+        comments.sort(key=lambda x: x['created_at'])
+        return comments
+
     def get_pr_context(self) -> str:
-        """Build context about the PR for Claude."""
+        """Build context about the PR for Claude, including conversation history."""
         context = f"""
 # Pull Request Context
 
@@ -88,34 +117,42 @@ class ClaudeReviewer:
 
 ## Files Changed:
 """
-        
+
         changed_files = self.get_changed_files()
         for file in changed_files:
             context += f"- `{file['filename']}` ({file['status']}, +{file['additions']}/-{file['deletions']})\n"
-        
-        context += f"\n## User Request:\n{self.command}\n"
-        
+
+        # Add conversation history for fix actions
+        if self.action_type == 'fix':
+            previous_comments = self.get_previous_claude_comments()
+            if previous_comments:
+                context += f"\n## Previous Conversation History:\n"
+                for i, comment in enumerate(previous_comments[:-1], 1):  # Exclude current comment
+                    context += f"{i}. **{comment['user']}**: @claude {comment['command']}\n"
+                context += f"\n*This conversation history should inform your implementation decisions.*\n"
+
+        context += f"\n## Current Request:\n{self.command}\n"
+
         return context, changed_files
     
     def analyze_with_claude(self, context: str, changed_files: List[Dict]) -> Tuple[str, List[Dict]]:
         """Send code to Claude for analysis."""
         
         # Build the prompt based on action type
-        if self.action_type == 'propose':
-            system_prompt = """You are a senior software engineer conducting a code review. The user has requested specific changes, improvements, or modifications to the code. This could include:
+        if self.action_type == 'fix':
+            system_prompt = """You are a senior software engineer implementing code fixes based on a conversation history.
 
-- 🔧 **Bug fixes**: Correcting errors and issues
-- ♻️ **Refactoring**: Improving code structure and organization  
-- ⚡ **Performance**: Optimizing for speed and efficiency
-- 🎨 **Style**: Improving code formatting and readability
-- ✨ **Enhancement**: Adding features or improving functionality
-- 🧹 **Cleanup**: Simplifying and cleaning up code
+IMPORTANT: You have been having a conversation about this PR. Based on the conversation history and current request:
 
-Analyze the code and provide:
-1. A detailed analysis of the requested changes
-2. Specific code modifications that address the request
-3. Implementation rationale and benefits
-4. Any potential risks or considerations
+1. **Prioritize HIGH-IMPACT issues**: Security vulnerabilities, bugs, breaking changes
+2. **Only implement changes that were specifically discussed or requested**
+3. **Reference the conversation context** in your implementation decisions
+4. **Be selective** - don't implement everything, focus on what was actually requested
+
+Provide:
+1. Analysis of what should be implemented based on the conversation
+2. Specific code modifications for the prioritized issues
+3. Rationale connecting back to the discussion history
 
 If you can propose specific code changes, provide them in this JSON format at the end:
 
@@ -132,14 +169,26 @@ If you can propose specific code changes, provide them in this JSON format at th
 }
 ```
 
-If no concrete changes can be proposed (e.g., the request is too vague or no improvements are needed), respond with:
+If no concrete changes should be implemented based on the conversation, respond with:
 ```json
 {
   "has_changes": false
 }
 ```
 
-Be thoughtful and conservative - only propose changes when they genuinely improve the code."""
+Be thoughtful and conservative - only implement changes that were clearly discussed and requested."""
+
+        elif self.action_type == 'plan':
+            system_prompt = """You are a senior software engineer helping to plan code improvements. This is a PLANNING session - do NOT implement any changes.
+
+Focus on:
+- 🎯 **Strategic thinking**: What are the key issues and opportunities?
+- 📋 **Planning**: What changes would be most beneficial?
+- ⚖️ **Prioritization**: What should be tackled first?
+- 🤔 **Discussion**: Ask clarifying questions if needed
+- 📝 **Documentation**: Outline the approach and considerations
+
+This is a conversation - engage with the user to understand their goals and help them think through the best approach. Do NOT provide code implementations in planning mode."""
         else:
             system_prompt = """You are a senior software engineer conducting a code review. Focus on HIGH-PRIORITY issues only by default:
 
@@ -335,8 +384,9 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
         # Save the review for comment posting
         self.save_review_output(claude_response)
         
-        # If this is a propose changes request, try to extract and apply changes
-        if self.action_type == 'propose':
+        # Handle different action types
+        if self.action_type == 'fix':
+            # Only try to extract and apply changes for fix actions
             changes = self.extract_file_changes(claude_response)
 
             if changes and changes.get('has_changes', False):
@@ -353,8 +403,16 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
             else:
                 self.set_github_output('has_changes', 'false')
                 print("Claude did not suggest any specific file changes")
-        else:
+
+        elif self.action_type in ['plan', 'review']:
+            # For planning and review, never create PRs - just provide analysis
             self.set_github_output('has_changes', 'false')
+            print(f"✅ {self.action_type.title()} completed - no changes applied")
+
+        else:
+            # Fallback for unknown action types
+            self.set_github_output('has_changes', 'false')
+            print(f"Unknown action type: {self.action_type}")
         
         print("Claude Reviewer completed")
 
