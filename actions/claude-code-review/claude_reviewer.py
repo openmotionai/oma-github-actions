@@ -14,9 +14,10 @@ from typing import Dict, List, Optional, Tuple
 try:
     import anthropic
     from github import Github
+    import httpx
 except ImportError as e:
     print(f"Error: Required package not installed: {e}")
-    print("Please ensure anthropic and PyGithub are installed in the workflow environment")
+    print("Please ensure anthropic, PyGithub, and httpx are installed in the workflow environment")
     sys.exit(1)
 
 
@@ -42,7 +43,8 @@ class ClaudeReviewer:
             self.action_type = os.environ['ACTION_TYPE']
             self.head_ref = os.environ['HEAD_REF']
             self.base_ref = os.environ['BASE_REF']
-            
+            self.mcp_server_url = os.environ.get('MCP_SERVER_URL', 'http://localhost:3000')
+
             self.repo = self.github_client.get_repo(self.repo_name)
             self.pr = self.repo.get_pull(self.pr_number)
         except ValueError as e:
@@ -51,7 +53,76 @@ class ClaudeReviewer:
             raise
         except Exception as e:
             raise RuntimeError(f"Failed to initialize ClaudeReviewer: {e}")
-    
+
+    def get_github_tools(self) -> List[Dict]:
+        """Define GitHub tools for Claude to use via tool calling."""
+        return [
+            {
+                "name": "get_pr_comments",
+                "description": "Get all comments on the current PR for conversation context",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_pr_files",
+                "description": "Get files changed in the current PR",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "create_pr_comment",
+                "description": "Create a comment on the current PR",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "body": {
+                            "type": "string",
+                            "description": "The comment body"
+                        }
+                    },
+                    "required": ["body"]
+                }
+            }
+        ]
+
+    def handle_tool_call(self, tool_name: str, tool_input: Dict) -> Dict:
+        """Handle tool calls from Claude."""
+        try:
+            if tool_name == "get_pr_comments":
+                comments = []
+                for comment in self.pr.get_issue_comments():
+                    comments.append({
+                        "id": comment.id,
+                        "user": comment.user.login,
+                        "body": comment.body,
+                        "created_at": comment.created_at.isoformat(),
+                        "updated_at": comment.updated_at.isoformat()
+                    })
+                return {"comments": comments}
+
+            elif tool_name == "get_pr_files":
+                return {"files": self.get_changed_files()}
+
+            elif tool_name == "create_pr_comment":
+                comment = self.pr.create_issue_comment(tool_input["body"])
+                return {
+                    "success": True,
+                    "comment_id": comment.id,
+                    "url": comment.html_url
+                }
+
+            else:
+                return {"error": f"Unknown tool: {tool_name}"}
+
+        except Exception as e:
+            return {"error": f"Tool execution failed: {str(e)}"}
+
     def get_changed_files(self) -> List[Dict]:
         """Get list of files changed in the PR."""
         changed_files = []
@@ -218,24 +289,53 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
         
         try:
             # Get configuration from environment
-            model = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
+            model = os.environ.get('CLAUDE_MODEL', 'claude-3-5-sonnet-20241022')
             max_tokens = int(os.environ.get('MAX_TOKENS', '4000'))
-            thinking_budget = int(os.environ.get('THINKING_BUDGET', '2000'))
-            
+
+            # Create message with tool support
+            messages = [{
+                "role": "user",
+                "content": message_content
+            }]
+
             response = self.anthropic_client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
-                temperature=1,  # Required to be 1 when thinking is enabled
-                thinking={
-                    "type": "enabled",
-                    "budget_tokens": thinking_budget
-                },
+                temperature=0.1,
                 system=system_prompt,
-                messages=[{
-                    "role": "user",
-                    "content": message_content
-                }]
+                messages=messages,
+                tools=self.get_github_tools()
             )
+
+            # Handle tool calls if present
+            if response.stop_reason == "tool_use":
+                # Process tool calls
+                tool_results = []
+                for content_block in response.content:
+                    if content_block.type == "tool_use":
+                        tool_result = self.handle_tool_call(
+                            content_block.name,
+                            content_block.input
+                        )
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": content_block.id,
+                            "content": json.dumps(tool_result)
+                        })
+
+                # Continue conversation with tool results
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+
+                # Get final response
+                response = self.anthropic_client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=0.1,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=self.get_github_tools()
+                )
             
             # Extract text content from response (handles thinking mode)
             text_content = ""
