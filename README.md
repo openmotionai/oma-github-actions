@@ -65,4 +65,4 @@ This repository contains multiple GitHub Actions for the OMA ecosystem. Each act
 
 ## License
 
-Private - OMA Internal Use Only
+MIT License - Open Source
