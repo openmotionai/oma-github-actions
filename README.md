@@ -1,33 +1,18 @@
 # OMA GitHub Actions
 
-Reusable GitHub Actions for OMA development workflows.
+A collection of reusable GitHub Actions for AI-powered development workflows.
 
-## Available Actions
+## 🤖 Claude Code Review Action
 
-### 🤖 Claude Code Review
-AI-powered code review using Claude 4 Sonnet with extended thinking.
+Get intelligent code reviews and suggestions from Claude 4 Sonnet by simply commenting on your pull requests.
 
-```yaml
-- uses: openmotionai/oma-github-actions/actions/claude-code-review@main
-  with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-```
+### ⚡ Quick Start
 
-**Features:**
-- High-priority security and bug detection
-- Concise, actionable feedback
-- Support for `@claude` comments on PRs
-- Extended thinking for complex analysis
-
-## Usage
-
-### Quick Setup
-1. Add `ANTHROPIC_API_KEY` to your repository secrets
-2. Create `.github/workflows/claude-review.yml`:
+Add this workflow to your repository at `.github/workflows/claude-review.yml`:
 
 ```yaml
 name: Claude Code Review
+
 on:
   issue_comment:
     types: [created]
@@ -51,18 +36,73 @@ jobs:
     - uses: openmotionai/oma-github-actions/actions/claude-code-review@main
       with:
         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Comment-Based Reviews
-- `@claude review this code` - General code review
-- `@claude fix the bug` - Specific improvement suggestions
-- `@claude check security` - Security-focused analysis
+### 🔑 Setup
 
-## Development
+1. **Get Anthropic API Key**:
+   - Sign up at [claude.ai](https://claude.ai) if you don't have an account
+   - Go to [console.anthropic.com](https://console.anthropic.com/settings/keys)
+   - Create a new API key
 
-This repository contains multiple GitHub Actions for the OMA ecosystem. Each action is self-contained in the `actions/` directory.
+2. **Add to Repository Secrets**:
+   ```bash
+   # Using GitHub CLI
+   gh secret set ANTHROPIC_API_KEY --body "your-api-key-here"
+   
+   # Or via web interface:
+   # Settings → Secrets and variables → Actions → New repository secret
+   ```
 
-## License
+### 🚀 Usage
 
-MIT License - Open Source
+Comment on any PR with Claude commands:
+
+**Review Mode** (analysis only):
+- `@claude review this code`
+- `@claude check for security issues`
+- `@claude analyze the logic in main.py`
+
+**Propose Changes Mode** (suggests improvements):
+- `@claude fix the bug in error handling`
+- `@claude refactor this function for clarity`
+- `@claude optimize the database queries`
+- `@claude add error handling to the API calls`
+
+### 💰 Cost
+
+- Uses Claude 4 Sonnet: ~$3 input / $15 output per million tokens
+- Typical PR review: $0.10-$0.50 depending on code size
+- Only charges when you use it (no monthly fees)
+
+## 📚 Documentation
+
+- [Claude Code Review Action](actions/claude-code-review/README.md) - Detailed documentation
+- [Advanced Configuration Examples](docs/) - Complex setups and customizations
+
+## 🛠️ Available Actions
+
+| Action | Description | Status |
+|--------|-------------|---------|
+| `claude-code-review` | AI-powered code review with Claude 4 Sonnet | ✅ Available |
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our contributing guidelines for more information.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🔒 Security
+
+- API keys are stored securely in GitHub secrets
+- No code data is retained by Claude
+- All communications are encrypted (HTTPS/TLS)
+- Temporary files are automatically cleaned up
+
+## 🆘 Support
+
+- Check the [troubleshooting guide](actions/claude-code-review/README.md#troubleshooting)
+- Open an issue for bugs or feature requests
+- Discussions for questions and community support
