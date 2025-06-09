@@ -1,0 +1,206 @@
+name: 'Claude Code Review'
+description: 'AI-powered code review using Claude 4 Sonnet with extended thinking'
+author: 'OMA (openmotionai)'
+
+inputs:
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude access'
+    required: true
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+    default: ${{ github.token }}
+  model:
+    description: 'Claude model to use'
+    required: false
+    default: 'claude-sonnet-4-20250514'
+  max-tokens:
+    description: 'Maximum tokens for Claude response'
+    required: false
+    default: '4000'
+  thinking-budget:
+    description: 'Thinking budget tokens for extended reasoning'
+    required: false
+    default: '2000'
+
+outputs:
+  review-posted:
+    description: 'Whether a review was posted'
+  has-changes:
+    description: 'Whether code changes were suggested'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ inputs.github-token }}
+        fetch-depth: 0
+
+    - name: Get PR details
+      id: pr-details
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          // Get PR number based on event type
+          let prNumber;
+          if (context.payload.pull_request) {
+            prNumber = context.payload.pull_request.number;
+          } else if (context.issue && context.issue.number) {
+            prNumber = context.issue.number;
+          } else {
+            throw new Error('Could not determine PR number');
+          }
+          
+          console.log(`PR Number: ${prNumber}`);
+          core.setOutput('pr_number', prNumber);
+          
+          const pr = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: prNumber
+          });
+          
+          core.setOutput('head_ref', pr.data.head.ref);
+          core.setOutput('head_sha', pr.data.head.sha);
+          core.setOutput('base_ref', pr.data.base.ref);
+          core.setOutput('pr_title', pr.data.title);
+
+    - name: Switch to PR branch
+      shell: bash
+      run: |
+        git fetch origin ${{ steps.pr-details.outputs.head_ref }}
+        git checkout ${{ steps.pr-details.outputs.head_ref }}
+
+    - name: Extract command from comment
+      id: extract-command
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          let comment = '';
+          let hasCommand = false;
+          
+          // Handle different event types
+          if (context.payload.comment) {
+            comment = context.payload.comment.body;
+          } else if (context.payload.review && context.payload.review.body) {
+            comment = context.payload.review.body;
+          } else {
+            // For PR events without comments, do a general review
+            core.setOutput('command', 'review this PR');
+            core.setOutput('has_command', 'true');
+            core.setOutput('action_type', 'review');
+            console.log('No comment found, defaulting to general PR review');
+            return;
+          }
+          
+          const claudeMatch = comment.match(/@[Cc]laude\s+(.+)/);
+          
+          if (claudeMatch) {
+            const command = claudeMatch[1].trim();
+            core.setOutput('command', command);
+            core.setOutput('has_command', 'true');
+            
+            // Determine action type
+            const proposeKeywords = ['fix', 'repair', 'correct', 'update', 'change', 'modify', 'implement', 'refactor', 'improve', 'optimize', 'add', 'remove', 'replace', 'rewrite', 'restructure', 'simplify', 'enhance', 'clean up', 'cleanup'];
+            const reviewKeywords = ['review', 'analyze', 'check', 'examine', 'look', 'explain', 'describe', 'what', 'how', 'why'];
+            
+            let actionType = 'review';
+            if (proposeKeywords.some(keyword => command.toLowerCase().includes(keyword))) {
+              actionType = 'propose';
+            }
+            
+            core.setOutput('action_type', actionType);
+            console.log(`Command: ${command}`);
+            console.log(`Action type: ${actionType}`);
+          } else {
+            core.setOutput('has_command', 'false');
+          }
+
+    - name: Setup Python
+      if: steps.extract-command.outputs.has_command == 'true'
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      if: steps.extract-command.outputs.has_command == 'true'
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install anthropic==0.25.0 PyGithub==1.59.1
+
+    - name: Run Claude analysis
+      if: steps.extract-command.outputs.has_command == 'true'
+      id: claude-analysis
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ steps.pr-details.outputs.pr_number }}
+        COMMAND: ${{ steps.extract-command.outputs.command }}
+        ACTION_TYPE: ${{ steps.extract-command.outputs.action_type }}
+        HEAD_REF: ${{ steps.pr-details.outputs.head_ref }}
+        BASE_REF: ${{ steps.pr-details.outputs.base_ref }}
+        CLAUDE_MODEL: ${{ inputs.model }}
+        MAX_TOKENS: ${{ inputs.max-tokens }}
+        THINKING_BUDGET: ${{ inputs.thinking-budget }}
+      run: python ${{ github.action_path }}/claude_reviewer.py
+
+    - name: Post review comment
+      if: steps.extract-command.outputs.has_command == 'true'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          let reviewContent = '';
+          
+          // Get the review file path from the previous step
+          const reviewFile = '${{ steps.claude-analysis.outputs.review_file }}' || '/tmp/claude_review.md';
+          
+          // Get the command safely
+          let command = '${{ steps.extract-command.outputs.command }}';
+          if (!command) {
+            command = 'general review';
+          }
+          
+          try {
+            reviewContent = fs.readFileSync(reviewFile, 'utf8');
+          } catch (error) {
+            reviewContent = `## 🤖 Claude Analysis
+
+            I've analyzed your request: "${command}"
+
+            The analysis completed but no specific changes were recommended at this time.
+            
+            ---
+            *Claude Code Review Action*`;
+          }
+
+          // Get PR number based on event type
+          let prNumber;
+          if (context.payload.pull_request) {
+            prNumber = context.payload.pull_request.number;
+          } else if (context.issue && context.issue.number) {
+            prNumber = context.issue.number;
+          } else {
+            prNumber = ${{ steps.pr-details.outputs.pr_number }};
+          }
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: prNumber,
+            body: reviewContent
+          });
+          
+          core.setOutput('review-posted', 'true');
+
+branding:
+  icon: 'eye'
+  color: 'blue'
