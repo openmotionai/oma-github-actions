@@ -328,9 +328,17 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                 print(f"🔧 Claude is using tools! Stop reason: {response.stop_reason}")
                 # Process tool calls
                 tool_results = []
+                used_get_pr_files = False
+                used_modify_file = False
+
                 for content_block in response.content:
                     if content_block.type == "tool_use":
                         print(f"🛠️ Tool called: {content_block.name} with input: {content_block.input}")
+                        if content_block.name == "get_pr_files":
+                            used_get_pr_files = True
+                        elif content_block.name == "modify_file":
+                            used_modify_file = True
+
                         tool_result = self.handle_tool_call(
                             content_block.name,
                             content_block.input
@@ -344,6 +352,14 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                 # Continue conversation with tool results
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})
+
+                # For fix mode: if Claude used get_pr_files but not modify_file, force it
+                if self.action_type == 'fix' and used_get_pr_files and not used_modify_file:
+                    print("🚨 FORCING modify_file usage in fix mode!")
+                    messages.append({
+                        "role": "user",
+                        "content": "You examined the files but didn't use modify_file tool. This is fix mode - you MUST use modify_file tool to implement the requested changes. Use modify_file now with the corrected file content."
+                    })
 
                 # Get final response
                 response = self.anthropic_client.messages.create(
