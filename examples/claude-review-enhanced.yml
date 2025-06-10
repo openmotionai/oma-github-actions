@@ -1,0 +1,40 @@
+name: Claude Code Review
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  claude-review:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && 
+       github.event.issue.pull_request &&
+       (contains(github.event.comment.body, '@claude') || 
+        contains(github.event.comment.body, '@Claude')))
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Debug GitHub Event
+      run: |
+        echo "Event name: ${{ github.event_name }}"
+        echo "Event action: ${{ github.event.action }}"
+        echo "Has issue: ${{ github.event.issue != null }}"
+        echo "Has pull_request: ${{ github.event.pull_request != null }}"
+        echo "Issue has pull_request: ${{ github.event.issue.pull_request != null }}"
+        if [ "${{ github.event_name }}" = "issue_comment" ]; then
+          echo "Comment body: ${{ github.event.comment.body }}"
+          echo "Comment user: ${{ github.event.comment.user.login }}"
+        fi
+
+    - uses: openmotionai/oma-github-actions/actions/claude-code-review@main
+      with:
+        anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}

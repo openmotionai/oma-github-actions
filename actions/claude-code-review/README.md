@@ -23,16 +23,18 @@ on:
     types: [opened, synchronize]
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: write
 
 jobs:
   claude-review:
     if: |
-      github.event.issue.pull_request || 
-      github.event.pull_request ||
-      (github.event.comment && (contains(github.event.comment.body, '@claude') || contains(github.event.comment.body, '@Claude')))
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       (contains(github.event.comment.body, '@claude') ||
+        contains(github.event.comment.body, '@Claude')))
     runs-on: ubuntu-latest
     
     steps:
