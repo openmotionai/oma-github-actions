@@ -56,7 +56,7 @@ class ClaudeReviewer:
 
     def get_github_tools(self) -> List[Dict]:
         """Define GitHub tools for Claude to use via tool calling."""
-        return [
+        tools = [
             {
                 "name": "get_pr_comments",
                 "description": "Get all comments on the current PR for conversation context",
@@ -91,6 +91,33 @@ class ClaudeReviewer:
             }
         ]
 
+        # Add file modification tools for fix mode
+        if self.action_type == 'fix':
+            tools.append({
+                "name": "modify_file",
+                "description": "Modify a file with new content to fix issues",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the file to modify"
+                        },
+                        "new_content": {
+                            "type": "string",
+                            "description": "The complete new content for the file"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Description of what was fixed"
+                        }
+                    },
+                    "required": ["file_path", "new_content", "description"]
+                }
+            })
+
+        return tools
+
     def handle_tool_call(self, tool_name: str, tool_input: Dict) -> Dict:
         """Handle tool calls from Claude."""
         try:
@@ -115,6 +142,23 @@ class ClaudeReviewer:
                     "success": True,
                     "comment_id": comment.id,
                     "url": comment.html_url
+                }
+
+            elif tool_name == "modify_file":
+                # Store file modifications for later application
+                if not hasattr(self, 'file_modifications'):
+                    self.file_modifications = []
+
+                self.file_modifications.append({
+                    "path": tool_input["file_path"],
+                    "content": tool_input["new_content"],
+                    "description": tool_input["description"]
+                })
+
+                return {
+                    "success": True,
+                    "message": f"File modification queued: {tool_input['file_path']}",
+                    "description": tool_input["description"]
                 }
 
             else:
@@ -220,34 +264,14 @@ IMPORTANT: You have been having a conversation about this PR. Based on the conve
 3. **Reference the conversation context** in your implementation decisions
 4. **Be selective** - don't implement everything, focus on what was actually requested
 
-Provide:
-1. Analysis of what should be implemented based on the conversation
-2. Specific code modifications for the prioritized issues
-3. Rationale connecting back to the discussion history
+Your workflow:
+1. Use get_pr_files tool to examine the current code
+2. For each file that needs fixing, use modify_file tool with the complete corrected content
+3. Use create_pr_comment tool to create a summary of what was fixed
 
-If you can propose specific code changes, provide them in this JSON format at the end:
+Focus on implementing the specific fixes mentioned in the conversation. Be precise and only change what's necessary to address the identified issues.
 
-```json
-{
-  "has_changes": true,
-  "files": [
-    {
-      "path": "file/path.py",
-      "action": "modify",
-      "content": "full file content with proposed changes"
-    }
-  ]
-}
-```
-
-If no concrete changes should be implemented based on the conversation, respond with:
-```json
-{
-  "has_changes": false
-}
-```
-
-Be thoughtful and conservative - only implement changes that were clearly discussed and requested."""
+After making all file modifications, create a summary comment explaining what was fixed."""
 
         elif self.action_type == 'plan':
             system_prompt = """You are a senior software engineer helping to plan code improvements. This is a PLANNING session - do NOT implement any changes.
@@ -486,23 +510,48 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
         
         # Handle different action types
         if self.action_type == 'fix':
-            # Only try to extract and apply changes for fix actions
-            changes = self.extract_file_changes(claude_response)
+            # Check if Claude made file modifications via tool calls
+            if hasattr(self, 'file_modifications') and self.file_modifications:
+                print(f"Claude made {len(self.file_modifications)} file modifications via tool calls")
+                files_changed = False
 
-            if changes and changes.get('has_changes', False):
-                print("Claude suggested changes, applying them...")
-                files_changed = self.apply_file_changes(changes)
+                for modification in self.file_modifications:
+                    try:
+                        # Write the new content
+                        with open(modification['path'], 'w', encoding='utf-8') as f:
+                            f.write(modification['content'])
+
+                        print(f"Modified: {modification['path']} - {modification['description']}")
+                        files_changed = True
+
+                    except Exception as e:
+                        print(f"Error modifying {modification['path']}: {e}")
 
                 if files_changed:
                     self.set_github_output('has_changes', 'true')
-                    print("✅ Changes applied successfully")
+                    print("✅ Changes applied successfully via tool calls")
                     print("Files will be committed and PR will be created by workflow")
                 else:
                     self.set_github_output('has_changes', 'false')
                     print("❌ No changes were applied")
             else:
-                self.set_github_output('has_changes', 'false')
-                print("Claude did not suggest any specific file changes")
+                # Fallback to old JSON parsing method
+                changes = self.extract_file_changes(claude_response)
+
+                if changes and changes.get('has_changes', False):
+                    print("Claude suggested changes via JSON, applying them...")
+                    files_changed = self.apply_file_changes(changes)
+
+                    if files_changed:
+                        self.set_github_output('has_changes', 'true')
+                        print("✅ Changes applied successfully via JSON")
+                        print("Files will be committed and PR will be created by workflow")
+                    else:
+                        self.set_github_output('has_changes', 'false')
+                        print("❌ No changes were applied")
+                else:
+                    self.set_github_output('has_changes', 'false')
+                    print("Claude did not suggest any specific file changes")
 
         elif self.action_type in ['plan', 'review']:
             # For planning and review, never create PRs - just provide analysis
