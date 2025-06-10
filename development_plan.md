@@ -10,8 +10,6 @@ Add standalone GitHub issues support to the Claude Code Review Action, enabling 
 - **PR Comments**: `@claude` triggers in PR comment contexts
 - **Case-insensitive Detection**: `@claude` or `@Claude` recognition
 - **Auto-review**: Automatic analysis on PR open/update
-- **Security Focus**: Vulnerability detection for vis_server components
-- **Fix Mode**: `@claude fix` creates automated fix PRs
 - **Comment Formatting**: Proper markdown display (no ToolUseBlock issues)
 
 ### ❌ Missing Features:
@@ -253,20 +251,4 @@ def handle_issue_mode_errors(self):
 - ✅ Issue #9 in oma-kineticos responds to `@claude` commands
 - ✅ Planning discussions work without file analysis
 - ✅ No regression in existing PR functionality
-- ✅ Proper error messages for unsupported scenarios
-
-## Rollback Plan
-
-If issues arise:
-1. Revert to main branch
-2. Fix in separate feature branch
-3. Test thoroughly before re-merge
-
-## Next Steps
-
-1. Implement Phase 1 (workflow triggers)
-2. Test basic issue detection
-3. Implement Phase 2 (core code changes)
-4. Validate with test cases
-5. Document new functionality
-6. Merge to main when stable
+- ✅ Proper error messages for unsupported scenario

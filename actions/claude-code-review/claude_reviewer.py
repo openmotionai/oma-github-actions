@@ -27,12 +27,12 @@ class ClaudeReviewer:
         # Validate required environment variables
         required_vars = [
             'ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY',
-            'PR_NUMBER', 'COMMAND', 'ACTION_TYPE', 'HEAD_REF', 'BASE_REF'
+            'PR_NUMBER', 'COMMAND', 'ACTION_TYPE'
         ]
         missing = [var for var in required_vars if not os.environ.get(var)]
         if missing:
             raise ValueError(f"Missing required environment variables: {missing}")
-        
+
         try:
             self.anthropic_client = anthropic.Anthropic(
                 api_key=os.environ['ANTHROPIC_API_KEY']
@@ -42,12 +42,34 @@ class ClaudeReviewer:
             self.pr_number = int(os.environ['PR_NUMBER'])
             self.command = os.environ['COMMAND']
             self.action_type = os.environ['ACTION_TYPE']
-            self.head_ref = os.environ['HEAD_REF']
-            self.base_ref = os.environ['BASE_REF']
             self.mcp_server_url = os.environ.get('MCP_SERVER_URL', 'http://localhost:3000')
 
+            # Add issue mode detection
+            self.event_name = os.environ.get('GITHUB_EVENT_NAME')
+            self.is_issue_mode = self.event_name in ['issues', 'issue_comment']
+
             self.repo = self.github_client.get_repo(self.repo_name)
-            self.pr = self.repo.get_pull(self.pr_number)
+
+            # Initialize based on context
+            if self.is_issue_mode:
+                # For issues, pr_number is actually issue_number
+                self.issue = self.repo.get_issue(self.pr_number)
+                self.pr = None
+
+                # Check if issue comment is on a PR-linked issue
+                if self.event_name == 'issue_comment':
+                    # If issue has pull_request link, it's a PR comment
+                    if hasattr(self.issue, 'pull_request') and self.issue.pull_request:
+                        self.is_issue_mode = False
+                        self.pr = self.repo.get_pull(self.pr_number)
+                        self.issue = None
+            else:
+                # Existing PR logic
+                self.head_ref = os.environ.get('HEAD_REF', 'main')
+                self.base_ref = os.environ.get('BASE_REF', 'main')
+                self.pr = self.repo.get_pull(self.pr_number)
+                self.issue = None
+
         except ValueError as e:
             if "invalid literal for int()" in str(e):
                 raise ValueError(f"PR_NUMBER must be a valid integer: {os.environ.get('PR_NUMBER')}")
@@ -170,16 +192,19 @@ class ClaudeReviewer:
 
     def get_changed_files(self) -> List[Dict]:
         """Get list of files changed in the PR."""
+        if self.is_issue_mode:
+            return []  # No files to analyze in issue-only mode
+
         changed_files = []
         files = self.pr.get_files()
-        
+
         for file in files:
             if file.status != 'removed':  # Skip removed files
                 try:
                     # Read current file content
                     content = self.repo.get_contents(file.filename, ref=self.head_ref)
                     file_content = content.decoded_content.decode('utf-8')
-                    
+
                     changed_files.append({
                         'filename': file.filename,
                         'status': file.status,
@@ -190,7 +215,7 @@ class ClaudeReviewer:
                     })
                 except Exception as e:
                     print(f"Warning: Could not read {file.filename}: {e}")
-                    
+
         return changed_files
     
     def get_previous_claude_comments(self) -> List[Dict]:
@@ -222,8 +247,11 @@ class ClaudeReviewer:
         comments.sort(key=lambda x: x['created_at'])
         return comments
 
-    def get_pr_context(self) -> str:
-        """Build context about the PR for Claude, including conversation history."""
+    def get_pr_context(self) -> Tuple[str, List[Dict]]:
+        """Build context about the PR/Issue for Claude, including conversation history."""
+        if self.is_issue_mode:
+            return self.get_issue_context()
+
         context = f"""
 # Pull Request Context
 
@@ -250,6 +278,24 @@ class ClaudeReviewer:
         context += f"\n## Current Request:\n{self.command}\n"
 
         return context, changed_files
+
+    def get_issue_context(self) -> Tuple[str, List[Dict]]:
+        """Build context for issue-only scenarios."""
+        context = f"""
+# Issue Context
+**Issue #{self.issue.number}**: {self.issue.title}
+**Description**: {self.issue.body or 'No description provided'}
+**State**: {self.issue.state}
+**Created**: {self.issue.created_at}
+
+## Current Request:
+{self.command}
+
+## Context:
+This is a planning/discussion request without specific code files to analyze.
+Focus on strategic thinking, architectural guidance, and actionable recommendations.
+"""
+        return context, []
     
     def analyze_with_claude(self, context: str, changed_files: List[Dict]) -> Tuple[str, List[Dict]]:
         """Send code to Claude for analysis."""
@@ -275,7 +321,20 @@ Focus on implementing the specific fixes mentioned in the conversation. Be preci
 After making all file modifications, create a summary comment explaining what was fixed."""
 
         elif self.action_type == 'plan':
-            system_prompt = """You are a senior software engineer helping to plan code improvements. This is a PLANNING session - do NOT implement any changes.
+            if self.is_issue_mode:
+                system_prompt = """You are a senior software engineer helping with strategic planning.
+This is a PLANNING session for an issue discussion - do NOT implement any changes.
+
+Focus on:
+- 🎯 **Strategic thinking**: What are the key considerations?
+- 📋 **Planning**: What approach would be most effective?
+- ⚖️ **Prioritization**: What should be tackled first?
+- 🤔 **Discussion**: Ask clarifying questions if needed
+- 📝 **Documentation**: Outline the approach and next steps
+
+Provide thoughtful guidance without code implementations."""
+            else:
+                system_prompt = """You are a senior software engineer helping to plan code improvements. This is a PLANNING session - do NOT implement any changes.
 
 Focus on:
 - 🎯 **Strategic thinking**: What are the key issues and opportunities?
@@ -286,10 +345,17 @@ Focus on:
 
 This is a conversation - engage with the user to understand their goals and help them think through the best approach. Do NOT provide code implementations in planning mode."""
         else:
-            system_prompt = """You are a senior software engineer conducting a code review. Focus on HIGH-PRIORITY issues only by default:
+            if self.is_issue_mode:
+                system_prompt = """You are a senior software engineer providing guidance on an issue.
+This is a DISCUSSION context - provide strategic advice and recommendations.
+
+Focus on architectural guidance, best practices, and actionable next steps.
+Ask clarifying questions if more context is needed."""
+            else:
+                system_prompt = """You are a senior software engineer conducting a code review. Focus on HIGH-PRIORITY issues only by default:
 
 🚨 **Critical Issues** (always mention):
-- Security vulnerabilities 
+- Security vulnerabilities
 - Bugs or logical errors
 - Breaking changes or API issues
 
@@ -303,14 +369,18 @@ This is a conversation - engage with the user to understand their goals and help
 
 Keep reviews CONCISE - highlight only the most important items unless asked for comprehensive analysis. Be specific and actionable."""
 
-        # Include file contents in the message
-        message_content = context + "\n\n## File Contents:\n\n"
-        
-        for file in changed_files:
-            message_content += f"### {file['filename']}\n\n"
-            if file['patch']:
-                message_content += f"**Diff:**\n```diff\n{file['patch']}\n```\n\n"
-            message_content += f"**Full Content:**\n```{self.get_file_extension(file['filename'])}\n{file['content']}\n```\n\n"
+        # Build message content
+        if self.is_issue_mode:
+            message_content = context  # No file contents for issues
+        else:
+            # Include file contents in the message for PRs
+            message_content = context + "\n\n## File Contents:\n\n"
+
+            for file in changed_files:
+                message_content += f"### {file['filename']}\n\n"
+                if file['patch']:
+                    message_content += f"**Diff:**\n```diff\n{file['patch']}\n```\n\n"
+                message_content += f"**Full Content:**\n```{self.get_file_extension(file['filename'])}\n{file['content']}\n```\n\n"
         
         try:
             # Get configuration from environment
@@ -494,16 +564,19 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
         print(f"Command: {self.command}")
         print(f"Action type: {self.action_type}")
         
-        # Get PR context and changed files
+        # Get PR/Issue context and changed files
         context, changed_files = self.get_pr_context()
-        
-        if not changed_files:
+
+        if not changed_files and not self.is_issue_mode:
             print("No changed files found in PR")
             self.save_review_output("No files to review in this PR.")
             return
         
-        print(f"Analyzing {len(changed_files)} changed files...")
-        
+        if self.is_issue_mode:
+            print("Analyzing issue context for planning/discussion...")
+        else:
+            print(f"Analyzing {len(changed_files)} changed files...")
+
         # Analyze with Claude
         claude_response, _ = self.analyze_with_claude(context, changed_files)
         

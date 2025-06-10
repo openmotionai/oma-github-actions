@@ -17,6 +17,8 @@ AI-powered code review using Claude 4 Sonnet with extended thinking capabilities
 ```yaml
 name: Claude Code Review
 on:
+  issues:
+    types: [opened]
   issue_comment:
     types: [created]
   pull_request:
@@ -32,11 +34,13 @@ jobs:
     if: |
       github.event_name == 'pull_request' ||
       (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request &&
        (contains(github.event.comment.body, '@claude') ||
-        contains(github.event.comment.body, '@Claude')))
+        contains(github.event.comment.body, '@Claude'))) ||
+      (github.event_name == 'issues' &&
+       (contains(github.event.issue.body, '@claude') ||
+        contains(github.event.issue.body, '@Claude')))
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: openmotionai/oma-github-actions/actions/claude-code-review@main
       with:
@@ -74,15 +78,20 @@ jobs:
 
 ## Comment Commands
 
-### Review Mode
+### Review Mode (PRs)
 - `@claude review this code` - General code analysis
 - `@claude check for security issues` - Security-focused review
 - `@claude analyze the logic` - Logic and flow analysis
 
-### Propose Changes Mode
-- `@claude fix the bug` - Bug fix suggestions
-- `@claude refactor this function` - Refactoring recommendations
-- `@claude optimize performance` - Performance improvements
+### Planning Mode (Issues)
+- `@claude help me plan a refactoring strategy` - Strategic planning
+- `@claude discuss architecture improvements` - Architecture guidance
+- `@claude plan modular components` - Design discussions
+
+### Fix Mode (PRs)
+- `@claude fix the bug` - Bug fix suggestions with PR creation
+- `@claude refactor this function` - Refactoring with implementation
+- `@claude optimize performance` - Performance improvements with code
 
 ## Setup Requirements
 
