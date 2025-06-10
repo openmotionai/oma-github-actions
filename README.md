@@ -78,13 +78,24 @@ Comment on any PR with Claude commands:
 ## 📚 Documentation
 
 - [Claude Code Review Action](actions/claude-code-review/README.md) - Detailed documentation
-- [Advanced Configuration Examples](docs/) - Complex setups and customizations
+
+## 🔮 Future Directions
+
+Based on research into AI code modification architectures in 2025, we've identified key improvements for automated code fixes:
+
+• **Direct File Modification Architecture**: Move away from tool calling patterns to direct file modification approaches similar to Aider and Cursor IDE, which parse AI responses for changes and apply them programmatically rather than relying on AI tool calling for file operations
+
+• **MCP Integration for Local Development**: Implement Model Context Protocol (MCP) integration for local development workflows, enabling real file system access and more reliable code modifications when working outside GitHub Actions constraints
+
+• **Diff-Based Change Application**: Adopt diff-based approaches for more reliable file modifications, especially for large files, using git patch mechanisms rather than full file replacement to reduce conflicts and improve merge reliability
 
 ## 🛠️ Available Actions
 
 | Action | Description | Status |
 |--------|-------------|---------|
-| `claude-code-review` | AI-powered code review with Claude 4 Sonnet | ✅ Available |
+| `claude-code-review` | AI-powered code review and analysis with Claude 4 Sonnet | ✅ Available |
+
+**Note**: Automated code fix PRs are currently in development. The action provides comprehensive code analysis and suggestions, with automated fix implementation planned for future releases.
 
 ## 🤝 Contributing
 
