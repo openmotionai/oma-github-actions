@@ -255,23 +255,15 @@ class ClaudeReviewer:
         
         # Build the prompt based on action type
         if self.action_type == 'fix':
-            system_prompt = """You are a senior software engineer implementing code fixes based on a conversation history.
+            system_prompt = """You are implementing code fixes. The user used @claude fix command.
 
-IMPORTANT: You have been having a conversation about this PR. Based on the conversation history and current request:
+MANDATORY: @claude fix commands require you to use modify_file tool. No exceptions.
 
-1. **Prioritize HIGH-IMPACT issues**: Security vulnerabilities, bugs, breaking changes
-2. **Only implement changes that were specifically discussed or requested**
-3. **Reference the conversation context** in your implementation decisions
-4. **Be selective** - don't implement everything, focus on what was actually requested
+Steps:
+1. Use get_pr_files tool to examine the code
+2. Use modify_file tool to implement the requested fixes with complete file content
 
-Your workflow:
-1. Use get_pr_files tool to examine the current code
-2. For each file that needs fixing, use modify_file tool with the complete corrected content
-3. Use create_pr_comment tool to create a summary of what was fixed
-
-Focus on implementing the specific fixes mentioned in the conversation. Be precise and only change what's necessary to address the identified issues.
-
-After making all file modifications, create a summary comment explaining what was fixed."""
+You MUST call modify_file tool for any file that needs changes. Simply describing fixes is not acceptable for fix commands."""
 
         elif self.action_type == 'plan':
             system_prompt = """You are a senior software engineer helping to plan code improvements. This is a PLANNING session - do NOT implement any changes.
@@ -333,10 +325,12 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
 
             # Handle tool calls if present
             if response.stop_reason == "tool_use":
+                print(f"🔧 Claude is using tools! Stop reason: {response.stop_reason}")
                 # Process tool calls
                 tool_results = []
                 for content_block in response.content:
                     if content_block.type == "tool_use":
+                        print(f"🛠️ Tool called: {content_block.name} with input: {content_block.input}")
                         tool_result = self.handle_tool_call(
                             content_block.name,
                             content_block.input
@@ -360,6 +354,10 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                     messages=messages,
                     tools=self.get_github_tools()
                 )
+            else:
+                print(f"⚠️ Claude did not use tools. Stop reason: {response.stop_reason}")
+                if self.action_type == 'fix':
+                    print("🚨 WARNING: In fix mode but Claude didn't call modify_file tool!")
             
             # Extract text content from response (handles thinking mode)
             text_content = ""
