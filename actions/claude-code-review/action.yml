@@ -43,53 +43,37 @@ runs:
         fetch-depth: 0
         repository: ${{ github.repository }}
 
-    - name: Get PR/Issue details
+    - name: Get PR details
       id: pr-details
       uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          // Get PR/Issue number based on event type
+          // Get PR number based on event type
           let prNumber;
-          let isIssueMode = false;
-
           if (context.payload.pull_request) {
             prNumber = context.payload.pull_request.number;
           } else if (context.issue && context.issue.number) {
             prNumber = context.issue.number;
-            // Check if this is a standalone issue (not a PR)
-            isIssueMode = !context.issue.pull_request;
           } else {
-            throw new Error('Could not determine PR/Issue number');
+            throw new Error('Could not determine PR number');
           }
-
-          console.log(`Number: ${prNumber}`);
-          console.log(`Is Issue Mode: ${isIssueMode}`);
+          
+          console.log(`PR Number: ${prNumber}`);
           core.setOutput('pr_number', prNumber);
-          core.setOutput('is_issue_mode', isIssueMode);
-
-          if (!isIssueMode) {
-            // Only get PR details if this is actually a PR
-            const pr = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber
-            });
-
-            core.setOutput('head_ref', pr.data.head.ref);
-            core.setOutput('head_sha', pr.data.head.sha);
-            core.setOutput('base_ref', pr.data.base.ref);
-            core.setOutput('pr_title', pr.data.title);
-          } else {
-            // For issues, set default values
-            core.setOutput('head_ref', 'main');
-            core.setOutput('head_sha', '');
-            core.setOutput('base_ref', 'main');
-            core.setOutput('pr_title', context.issue.title);
-          }
+          
+          const pr = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: prNumber
+          });
+          
+          core.setOutput('head_ref', pr.data.head.ref);
+          core.setOutput('head_sha', pr.data.head.sha);
+          core.setOutput('base_ref', pr.data.base.ref);
+          core.setOutput('pr_title', pr.data.title);
 
     - name: Switch to PR branch
-      if: steps.pr-details.outputs.is_issue_mode != 'true'
       shell: bash
       run: |
         git fetch origin ${{ steps.pr-details.outputs.head_ref }}
@@ -109,9 +93,6 @@ runs:
             comment = context.payload.comment.body;
           } else if (context.payload.review && context.payload.review.body) {
             comment = context.payload.review.body;
-          } else if (context.payload.issue && context.payload.issue.body) {
-            // For issue creation events, check the issue body
-            comment = context.payload.issue.body;
           } else {
             // For PR events without comments, do a general review
             core.setOutput('command', 'review this PR');
@@ -196,7 +177,6 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
-        GITHUB_EVENT_NAME: ${{ github.event_name }}
         PR_NUMBER: ${{ steps.pr-details.outputs.pr_number }}
         COMMAND: ${{ steps.extract-command.outputs.command }}
         ACTION_TYPE: ${{ steps.extract-command.outputs.action_type }}
@@ -286,8 +266,8 @@ runs:
           // Get the review file path from the previous step
           const reviewFile = '${{ steps.claude-analysis.outputs.review_file }}' || '/tmp/claude_review.md';
 
-          // Get the command safely
-          let command = '${{ steps.extract-command.outputs.command }}';
+          // Get the command safely - escape quotes to prevent JS syntax errors
+          let command = `${{ steps.extract-command.outputs.command }}`.replace(/'/g, "\\'").replace(/"/g, '\\"');
           if (!command) {
             command = 'general review';
           }
