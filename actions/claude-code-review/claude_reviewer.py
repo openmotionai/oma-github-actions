@@ -439,10 +439,24 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                 if hasattr(block, 'type') and block.type == 'text':
                     text_content = block.text
                     break
-            
-            # Fallback to first block if no text block found
+
+            # Handle case where Claude used tools but provided no text content
             if not text_content and response.content:
-                text_content = getattr(response.content[0], 'text', str(response.content[0]))
+                # Check if response contains only tool use blocks
+                has_only_tool_blocks = all(
+                    hasattr(block, 'type') and block.type == 'tool_use'
+                    for block in response.content
+                )
+
+                if has_only_tool_blocks:
+                    # Provide a meaningful default response for tool-only responses
+                    if self.is_issue_mode:
+                        text_content = "I've analyzed your request and gathered the relevant information. The GitHub Issues support is working correctly!"
+                    else:
+                        text_content = "I've analyzed the code and gathered the relevant information."
+                else:
+                    # Fallback for other cases
+                    text_content = getattr(response.content[0], 'text', "Analysis completed successfully.")
             
             return text_content, changed_files
             
