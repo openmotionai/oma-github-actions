@@ -404,11 +404,13 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
 
             # Handle tool calls if present
             if response.stop_reason == "tool_use":
+                print("Claude made tool calls, processing...")
                 # Process tool calls
                 tool_results = []
 
                 for content_block in response.content:
                     if content_block.type == "tool_use":
+                        print(f"Processing tool call: {content_block.name}")
                         tool_result = self.handle_tool_call(
                             content_block.name,
                             content_block.input
@@ -423,8 +425,9 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})
 
-                # Get final response
-                response = self.anthropic_client.messages.create(
+                print("Getting Claude's final response after tool calls...")
+                # Get final response with explicit prompt for analysis
+                final_response = self.anthropic_client.messages.create(
                     model=model,
                     max_tokens=max_tokens,
                     temperature=0.1,
@@ -432,7 +435,41 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                     messages=messages,
                     tools=self.get_github_tools()
                 )
-            
+
+                # Handle potential additional tool calls in final response
+                if final_response.stop_reason == "tool_use":
+                    print("Claude made additional tool calls in final response, processing...")
+                    # Process additional tool calls if needed
+                    additional_tool_results = []
+                    for content_block in final_response.content:
+                        if content_block.type == "tool_use":
+                            print(f"Processing additional tool call: {content_block.name}")
+                            tool_result = self.handle_tool_call(
+                                content_block.name,
+                                content_block.input
+                            )
+                            additional_tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": content_block.id,
+                                "content": json.dumps(tool_result)
+                            })
+
+                    # Get truly final response
+                    messages.append({"role": "assistant", "content": final_response.content})
+                    messages.append({"role": "user", "content": additional_tool_results})
+
+                    final_response = self.anthropic_client.messages.create(
+                        model=model,
+                        max_tokens=max_tokens,
+                        temperature=0.1,
+                        system=system_prompt,
+                        messages=messages
+                    )
+
+                # Use the final response for text extraction
+                response = final_response
+                print(f"Final response stop reason: {response.stop_reason}")
+
             # Extract text content from response (handles thinking mode)
             text_content = ""
             for block in response.content:
@@ -440,8 +477,16 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                     text_content = block.text
                     break
 
-            # Handle case where Claude used tools but provided no text content
+            print(f"Extracted text content length: {len(text_content) if text_content else 0}")
+
+            # Handle case where no text content was extracted
             if not text_content and response.content:
+                print("No text content found, analyzing response structure...")
+
+                # Debug: print response structure
+                for i, block in enumerate(response.content):
+                    print(f"Block {i}: type={getattr(block, 'type', 'unknown')}")
+
                 # Check if response contains only tool use blocks
                 has_only_tool_blocks = all(
                     hasattr(block, 'type') and block.type == 'tool_use'
@@ -449,14 +494,19 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                 )
 
                 if has_only_tool_blocks:
-                    # Provide a meaningful default response for tool-only responses
+                    # This shouldn't happen after tool call completion, but handle gracefully
+                    print("Warning: Final response contains only tool blocks")
                     if self.is_issue_mode:
-                        text_content = "I've analyzed your request and gathered the relevant information. The GitHub Issues support is working correctly!"
+                        text_content = "I've gathered information about your request. Please let me know if you need more specific analysis or have additional questions."
                     else:
-                        text_content = "I've analyzed the code and gathered the relevant information."
+                        text_content = "I've analyzed the code changes. Please let me know if you need more specific feedback or have questions."
                 else:
-                    # Fallback for other cases
-                    text_content = getattr(response.content[0], 'text', "Analysis completed successfully.")
+                    # Try to extract text from first block as fallback
+                    first_block = response.content[0] if response.content else None
+                    if first_block and hasattr(first_block, 'text'):
+                        text_content = first_block.text
+                    else:
+                        text_content = "Analysis completed. Please let me know if you need more specific information."
             
             return text_content, changed_files
             
