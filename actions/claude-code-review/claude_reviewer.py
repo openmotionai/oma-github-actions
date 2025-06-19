@@ -470,14 +470,35 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                 response = final_response
                 print(f"Final response stop reason: {response.stop_reason}")
 
-            # Extract text content from response (handles thinking mode)
+            # Extract text content from response (handles thinking mode and tool calls)
             text_content = ""
+            tool_calls_in_final = []
+
             for block in response.content:
-                if hasattr(block, 'type') and block.type == 'text':
-                    text_content = block.text
-                    break
+                if hasattr(block, 'type'):
+                    if block.type == 'text':
+                        text_content = block.text
+                    elif block.type == 'tool_use':
+                        tool_calls_in_final.append(block)
 
             print(f"Extracted text content length: {len(text_content) if text_content else 0}")
+            print(f"Tool calls in final response: {len(tool_calls_in_final)}")
+
+            # Handle case where Claude made tool calls in the final response
+            if tool_calls_in_final and not text_content:
+                print("Final response contains tool calls, extracting content from tool inputs...")
+
+                # Extract content from tool call inputs (common pattern for create_pr_comment)
+                for tool_call in tool_calls_in_final:
+                    if hasattr(tool_call, 'input') and isinstance(tool_call.input, dict):
+                        # Look for common content fields
+                        for field in ['body', 'content', 'message', 'text']:
+                            if field in tool_call.input:
+                                text_content = tool_call.input[field]
+                                print(f"Extracted content from tool call {tool_call.name}.{field}")
+                                break
+                        if text_content:
+                            break
 
             # Handle case where no text content was extracted
             if not text_content and response.content:
@@ -485,7 +506,10 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
 
                 # Debug: print response structure
                 for i, block in enumerate(response.content):
-                    print(f"Block {i}: type={getattr(block, 'type', 'unknown')}")
+                    block_type = getattr(block, 'type', 'unknown')
+                    print(f"Block {i}: type={block_type}")
+                    if block_type == 'tool_use' and hasattr(block, 'name'):
+                        print(f"  Tool: {block.name}")
 
                 # Check if response contains only tool use blocks
                 has_only_tool_blocks = all(
