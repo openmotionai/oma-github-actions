@@ -730,9 +730,23 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
 
 
 if __name__ == "__main__":
+    print("Starting Claude Reviewer...")
+    print(f"Python version: {sys.version}")
+    print(f"Environment variables:")
+    for key in ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY', 'GITHUB_EVENT_NAME', 'PR_NUMBER', 'COMMAND', 'ACTION_TYPE']:
+        value = os.environ.get(key, 'NOT SET')
+        if key == 'ANTHROPIC_API_KEY' and value != 'NOT SET':
+            value = f"{value[:8]}..."
+        if key == 'GITHUB_TOKEN' and value != 'NOT SET':
+            value = f"{value[:8]}..."
+        print(f"  {key}: {value}")
+
     try:
         reviewer = ClaudeReviewer()
         reviewer.run()
+        print("Claude Reviewer completed successfully")
     except Exception as e:
         print(f"Error in Claude Reviewer: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
