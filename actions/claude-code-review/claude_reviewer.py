@@ -42,7 +42,7 @@ class ClaudeReviewer:
             self.pr_number = int(os.environ['PR_NUMBER'])
             self.command = os.environ['COMMAND']
             self.action_type = os.environ['ACTION_TYPE']
-            self.mcp_server_url = os.environ.get('MCP_SERVER_URL', 'http://localhost:3000')
+            # MCP server removed - using direct GitHub API integration
 
             # Add issue mode detection
             self.event_name = os.environ.get('GITHUB_EVENT_NAME')
