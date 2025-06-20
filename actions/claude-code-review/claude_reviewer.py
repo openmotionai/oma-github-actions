@@ -333,12 +333,17 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
             )
 
             # Handle tool calls if present
+            created_comment_via_tool = False
             if response.stop_reason == "tool_use":
                 # Process tool calls
                 tool_results = []
 
                 for content_block in response.content:
                     if content_block.type == "tool_use":
+                        # Check if Claude used create_pr_comment tool
+                        if content_block.name == "create_pr_comment":
+                            created_comment_via_tool = True
+
                         tool_result = self.handle_tool_call(
                             content_block.name,
                             content_block.input
@@ -370,22 +375,11 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
                     text_content = block.text
                     break
             
-            # Handle case where Claude used tools but provided no text content
+            # Fallback to first block if no text block found
             if not text_content and response.content:
-                # Check if response contains only tool use blocks
-                has_only_tool_blocks = all(
-                    hasattr(block, 'type') and block.type == 'tool_use'
-                    for block in response.content
-                )
-
-                if has_only_tool_blocks:
-                    # Provide a meaningful default response for tool-only responses
-                    text_content = "I've analyzed the code and gathered the relevant information."
-                else:
-                    # Fallback for other cases
-                    text_content = getattr(response.content[0], 'text', "Analysis completed successfully.")
+                text_content = getattr(response.content[0], 'text', str(response.content[0]))
             
-            return text_content, changed_files
+            return text_content, changed_files, created_comment_via_tool
             
         except Exception as e:
             print(f"Error calling Claude API: {e}")
@@ -516,10 +510,15 @@ Keep reviews CONCISE - highlight only the most important items unless asked for 
         print(f"Analyzing {len(changed_files)} changed files...")
         
         # Analyze with Claude
-        claude_response, _ = self.analyze_with_claude(context, changed_files)
+        claude_response, _, created_comment_via_tool = self.analyze_with_claude(context, changed_files)
         
-        # Save the review for comment posting
-        self.save_review_output(claude_response)
+        # Save the review for comment posting (only if Claude didn't already post via tool)
+        if not created_comment_via_tool:
+            self.save_review_output(claude_response)
+        else:
+            # Claude already posted a comment via tool, signal to skip workflow comment
+            self.set_github_output('comment_posted_via_tool', 'true')
+            print("Claude posted comment via tool - skipping workflow comment")
         
         # Handle different action types
         if self.action_type == 'fix':

@@ -255,7 +255,7 @@ runs:
         draft: false
 
     - name: Post review comment
-      if: steps.extract-command.outputs.has_command == 'true'
+      if: steps.extract-command.outputs.has_command == 'true' && steps.claude-analysis.outputs.comment_posted_via_tool != 'true'
       uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.github-token }}
