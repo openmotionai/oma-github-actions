@@ -22,20 +22,20 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  issues: write
 
 jobs:
   claude-review:
     if: |
-      github.event.issue.pull_request || 
-      github.event.pull_request ||
-      (github.event.comment && (contains(github.event.comment.body, '@claude') || contains(github.event.comment.body, '@Claude')))
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       (contains(github.event.comment.body, '@claude') || contains(github.event.comment.body, '@Claude')))
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: openmotionai/oma-github-actions/actions/claude-code-review@main
       with:
         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### 🔑 Setup
@@ -53,6 +53,19 @@ jobs:
    # Or via web interface:
    # Settings → Secrets and variables → Actions → New repository secret
    ```
+
+### ⚠️ Known Limitations
+
+**GitHub Issues Support**: An attempt was made (June 2025) to extend Claude reviewer functionality to standalone GitHub issues for planning discussions, but this implementation was reverted due to:
+- Workflow failures and instability
+- Complex event handling conflicts between issues and PRs
+- ToolUseBlock formatting issues in responses
+
+The current version only supports:
+- Pull request reviews (automatic on PR creation/updates)
+- PR comment triggers (using `@claude` mentions in PR comments)
+
+For planning discussions, continue to use PRs or consider alternative approaches.
 
 ### 🚀 Usage
 
@@ -88,6 +101,18 @@ Based on research into AI code modification architectures in 2025, we've identif
 • **MCP Integration for Local Development**: Implement Model Context Protocol (MCP) integration for local development workflows, enabling real file system access and more reliable code modifications when working outside GitHub Actions constraints
 
 • **Diff-Based Change Application**: Adopt diff-based approaches for more reliable file modifications, especially for large files, using git patch mechanisms rather than full file replacement to reduce conflicts and improve merge reliability
+
+### GitHub Issues Support - Next Steps
+
+For future attempts to implement GitHub Issues support for planning discussions:
+
+• **Simplified Event Handling**: Focus on a single event type (issue_comment) rather than mixing issues, issue_comment, and pull_request events to reduce complexity
+
+• **Separate Workflow Files**: Create dedicated workflows for issues vs PRs to avoid conditional logic conflicts
+
+• **Response Formatting**: Investigate and fix ToolUseBlock formatting issues that caused raw tool output to appear in comments instead of formatted responses
+
+• **Alternative Approaches**: Consider using GitHub Discussions API or dedicated planning tools rather than trying to extend PR-focused workflows to standalone issues
 
 ## 🛠️ Available Actions
 
